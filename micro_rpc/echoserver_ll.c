@@ -527,7 +527,7 @@ int main(int argc, char *argv[])
         max_events = atoi(argv[10]);
     }
 
-    if (flextcp_init() != 0) {
+    if (flextcp_init(0) != 0) {
         fprintf(stderr, "flextcp_init failed\n");
         return EXIT_FAILURE;
     }
@@ -541,7 +541,7 @@ int main(int argc, char *argv[])
 
     for (i = 0; i < num_threads; i++) {
         cs[i].cn = i;
-        if (flextcp_context_create(&cs[i].ctx) != 0) {
+        if (flextcp_context_create(&cs[i].ctx, NULL, NULL) != 0) {
             fprintf(stderr, "flextcp_context_create failed\n");
             return EXIT_FAILURE;
         }

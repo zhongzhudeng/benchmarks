@@ -42,6 +42,7 @@
 #include <locale.h>
 #include <inttypes.h>
 
+#include <utils.h>
 #include "../common/socket_shim.h"
 
 #ifdef USE_MTCP
@@ -745,7 +746,7 @@ int main(int argc, char *argv[])
     uint64_t t_prev, t_cur;
     long double *ttp, tp, tp_total;
     uint32_t *hist, hx;
-    uint64_t msg_total, open_total;
+    uint64_t msg_total, open_total, ts, n_messages;
     double fracs[6] = { 0.5, 0.9, 0.95, 0.99, 0.999, 0.9999 };
     size_t fracs_pos[sizeof(fracs) / sizeof(fracs[0])];
 
@@ -823,6 +824,7 @@ int main(int argc, char *argv[])
     }
 
     t_prev = get_nanos();
+    n_messages = 0;
     while (1) {
         sleep(1);
         t_cur = get_nanos();
@@ -831,6 +833,7 @@ int main(int argc, char *argv[])
         open_total = 0;
         for (i = 0; i < num_threads; i++) {
             tp = cs[i].messages;
+            n_messages += cs[i].messages;
             open_total += cs[i].conn_open;
             cs[i].messages = 0;
             tp /= (double) (t_cur - t_prev) / 1000000000.;
@@ -847,10 +850,11 @@ int main(int argc, char *argv[])
         hist_fract_buckets(hist, msg_total, fracs, fracs_pos,
                 sizeof(fracs) / sizeof(fracs[0]));
 
-
-        printf("TP: total=%'.2Lf mbps  50p=%d us  90p=%d us  95p=%d us  "
+        ts = util_rdtsc(); 
+        printf("TP: ts=%ld  n_messages=%ld  total=%'.2Lf mbps  "
+                "50p=%d us  90p=%d us  95p=%d us  "
                 "99p=%d us  99.9p=%d us  99.99p=%d us  flows=%lu",
-                tp_total * message_size * 8 / 1000000.,
+                ts, n_messages, tp_total * message_size * 8 / 1000000.,
                 hist_value(fracs_pos[0]), hist_value(fracs_pos[1]),
                 hist_value(fracs_pos[2]), hist_value(fracs_pos[3]),
                 hist_value(fracs_pos[4]), hist_value(fracs_pos[5]),
