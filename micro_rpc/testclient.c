@@ -379,7 +379,6 @@ static inline int conn_receive(struct core *c, struct connection *co)
         } else if (ret == 0) {
             /* end of stream */
             conn_close(c, co);
-            printf("conn_close\n");
             return -1;
         } else if (ret < 0 && errno != EAGAIN) {
             /* errror, close connection */
@@ -577,7 +576,6 @@ static void open_all(struct core *c)
 
     while (c->conn_open != num_conns) {
         connect_more(c);
-
         /* epoll, wait for events */
         if ((ret = ss_epoll_wait(sc, ep, evs, max_conn_pending, -1)) < 0) {
             fprintf(stderr, "[%ld] epoll_wait failed\n", c->id);
