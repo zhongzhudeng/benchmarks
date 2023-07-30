@@ -848,7 +848,7 @@ int main(int argc, char *argv[])
         dir_path = argv[11];
     }
 
-    if (argc >= 12) {
+    if (argc >= 13) {
         file_name = argv[12];
     }
 
