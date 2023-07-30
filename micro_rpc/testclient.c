@@ -71,7 +71,7 @@
 #define HIST_BUCKET_US 1
 #define HIST_BUCKETS (1024 * 1024)
 
-#define MAX_FILE_PATH_SIZE 50
+#define MAX_FILE_PATH_SIZE 200
 
 enum conn_state {
     CONN_CLOSED = 0,
