@@ -41,6 +41,9 @@
 #include <assert.h>
 #include <locale.h>
 #include <inttypes.h>
+#include <time.h>
+#include <sys/time.h>
+#include <math.h>
 
 #include <utils.h>
 #include "../common/socket_shim.h"
@@ -82,6 +85,9 @@ enum conn_state {
 
 static char *dir_path;
 static char *file_name;
+static uint8_t bursty = 0;
+static uint64_t burst_length_mean = 0;
+static uint64_t burst_interval_mean = 0;
 static uint32_t max_pending = 64;
 static uint32_t max_conn_pending = 16;
 static uint32_t message_size = 64;
@@ -174,6 +180,28 @@ static inline uint64_t read_cnt(uint64_t *p)
   return v;
 }
 #endif
+
+double rand_normal(double mean, double stddev, unsigned int seed) {
+    int have_value = 0;
+    double stored_value;
+
+    if (have_value) {
+        have_value = 0;
+        return mean + stored_value * stddev;
+    } else {
+        double u, v, s;
+        do {
+            u = (rand_r(&seed) / ((double)RAND_MAX)) * 2.0 - 1.0;
+            v = (rand_r(&seed) / ((double)RAND_MAX)) * 2.0 - 1.0;
+            s = u * u + v * v;
+        } while (s >= 1.0 || s == 0.0);
+
+        double multiplier = sqrt(-2.0 * log(s) / s);
+        stored_value = v * multiplier;
+        have_value = 1;
+        return mean + u * multiplier * stddev;
+    }
+}
 
 static inline void conn_connect(struct core *c, struct connection *co)
 {
@@ -494,7 +522,7 @@ static inline int conn_send(struct core *c, struct connection *co)
 }
 
 static inline void conn_events(struct core *c, struct connection *co,
-        uint32_t events)
+        uint32_t events, uint8_t burst_mode)
 {
     int status;
     socklen_t slen;
@@ -540,9 +568,10 @@ static inline void conn_events(struct core *c, struct connection *co,
         return;
     }
 
-    /* send out requests */
-    if (conn_send(c, co) != 0) {
-        return;
+    if (burst_mode) {
+        if (conn_send(c, co) != 0) {
+            return;
+        }
     }
 
     if ((events & SS_EPOLLHUP) != 0) {
@@ -644,8 +673,16 @@ static void *thread_run(void *arg)
     struct core *c = arg;
     int i, cn, ret, ep, num_evs;
     struct connection *co;
+    struct timeval cur_ts;
+    time_t burst_start = 0, burst_end = 0;
     ssctx_t sc;
     ss_epev_t *evs;
+    uint8_t burst_mode = 1;
+    pid_t pid = getpid();
+
+    unsigned int interval_seed = pid, length_seed = pid;
+    uint64_t binterval = rand_normal(burst_interval_mean, 1, interval_seed);
+    uint64_t blength = rand_normal(burst_length_mean, 1, length_seed);
 
     prepare_core(c);
 
@@ -673,9 +710,24 @@ static void *thread_run(void *arg)
             abort();
         }
 
+        gettimeofday(&cur_ts, NULL);
+        if ((cur_ts.tv_sec - burst_end > binterval) 
+                && bursty && burst_mode == 0) {
+            burst_mode = 1;
+            burst_start = cur_ts.tv_sec;
+            interval_seed++;
+            binterval = rand_normal(burst_interval_mean, 1, interval_seed);
+        } else if ((cur_ts.tv_sec - burst_start > blength) 
+                && bursty && burst_mode == 1) {
+            burst_mode = 0;
+            burst_end = cur_ts.tv_sec;
+            length_seed++;
+            blength = rand_normal(burst_length_mean, 1, length_seed);
+        }
+
         for (i = 0; i < ret; i++) {
             co = evs[i].data.ptr;
-            conn_events(c, co, evs[i].events);
+            conn_events(c, co, evs[i].events, burst_mode);
         }
     }
 }
@@ -799,7 +851,7 @@ int main(int argc, char *argv[])
 
     setlocale(LC_NUMERIC, "");
 
-    if (argc < 5 || argc > 13) {
+    if (argc < 5 || argc > 16) {
         fprintf(stderr, "Usage: ./testclient IP PORT CORES CONFIG "
             "[MESSAGE-SIZE] [MAX-PENDING] [TOTAL-CONNS] "
             "[OPENALL-DELAY] [MAX-MSGS-CONN] [MAX-PEND-CONNS] " 
@@ -845,10 +897,22 @@ int main(int argc, char *argv[])
     }
 
     if (argc >= 12) {
-        dir_path = argv[11];
+        bursty = atoi(argv[11]);
     }
 
     if (argc >= 13) {
+        burst_length_mean = atoi(argv[12]);
+    }
+
+    if (argc >= 14) {
+        burst_interval_mean = atoi(argv[13]);
+    }
+
+    if (argc >= 15) {
+        dir_path = argv[11];
+    }
+
+    if (argc >= 16) {
         file_name = argv[12];
     }
 
