@@ -69,7 +69,7 @@
 
 #define HIST_START_US 0
 #define HIST_BUCKET_US 1
-#define HIST_BUCKETS (1024 * 1024)
+#define HIST_BUCKETS (256 * 1024)
 
 #define MAX_FILE_PATH_SIZE 200
 
