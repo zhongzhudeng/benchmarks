@@ -855,6 +855,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Usage: ./testclient IP PORT CORES CONFIG "
             "[MESSAGE-SIZE] [MAX-PENDING] [TOTAL-CONNS] "
             "[OPENALL-DELAY] [MAX-MSGS-CONN] [MAX-PEND-CONNS] " 
+            "[BURSTY] [BURST-LENGTH] [BURST-INTERVAL] "
             "[LATENCY-FILE-DIR] [LATENCY-FILE]\n");
         return EXIT_FAILURE;
     }
