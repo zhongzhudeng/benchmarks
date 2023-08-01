@@ -6,7 +6,7 @@ TAS_CODE?=/local/mstolet/projects/tas
 CFLAGS = -std=gnu99 -g -Wall -O3 -march=native \
 	-I$(TAS_CODE)/include -I$(TAS_CODE)/lib/tas/include
 LDFLAGS =-m64 -g -O3 -pthread  -march=native -no-pie
-LDLIBS = -lrt -lm
+LDLIBS = -lrt
 
 ESOBJS_COMMON= $(TAS_CODE)/lib/utils/rng.o \
 	icache_fill1.o icache_fill8.o icache_fill64.o icache_fill256.o \

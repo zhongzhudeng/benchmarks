@@ -43,7 +43,6 @@
 #include <inttypes.h>
 #include <time.h>
 #include <sys/time.h>
-#include <math.h>
 
 #include <utils.h>
 #include "../common/socket_shim.h"
@@ -86,8 +85,8 @@ enum conn_state {
 static char *dir_path;
 static char *file_name;
 static uint8_t bursty = 0;
-static uint64_t burst_length_mean = 0;
-static uint64_t burst_interval_mean = 0;
+static uint64_t burst_length = 0;
+static uint64_t burst_interval = 0;
 static uint32_t max_pending = 64;
 static uint32_t max_conn_pending = 16;
 static uint32_t message_size = 64;
@@ -180,28 +179,6 @@ static inline uint64_t read_cnt(uint64_t *p)
   return v;
 }
 #endif
-
-double rand_normal(double mean, double stddev, unsigned int seed) {
-    int have_value = 0;
-    double stored_value;
-
-    if (have_value) {
-        have_value = 0;
-        return mean + stored_value * stddev;
-    } else {
-        double u, v, s;
-        do {
-            u = (rand_r(&seed) / ((double)RAND_MAX)) * 2.0 - 1.0;
-            v = (rand_r(&seed) / ((double)RAND_MAX)) * 2.0 - 1.0;
-            s = u * u + v * v;
-        } while (s >= 1.0 || s == 0.0);
-
-        double multiplier = sqrt(-2.0 * log(s) / s);
-        stored_value = v * multiplier;
-        have_value = 1;
-        return mean + u * multiplier * stddev;
-    }
-}
 
 static inline void conn_connect(struct core *c, struct connection *co)
 {
@@ -678,11 +655,6 @@ static void *thread_run(void *arg)
     ssctx_t sc;
     ss_epev_t *evs;
     uint8_t burst_mode = 1;
-    pid_t pid = getpid();
-
-    unsigned int interval_seed = pid, length_seed = pid;
-    uint64_t binterval = rand_normal(burst_interval_mean, 1, interval_seed);
-    uint64_t blength = rand_normal(burst_length_mean, 1, length_seed);
 
     prepare_core(c);
 
@@ -711,18 +683,14 @@ static void *thread_run(void *arg)
         }
 
         gettimeofday(&cur_ts, NULL);
-        if ((cur_ts.tv_sec - burst_end > binterval) 
+        if ((cur_ts.tv_sec - burst_end > burst_interval) 
                 && bursty && burst_mode == 0) {
             burst_mode = 1;
             burst_start = cur_ts.tv_sec;
-            interval_seed++;
-            binterval = rand_normal(burst_interval_mean, 1, interval_seed);
-        } else if ((cur_ts.tv_sec - burst_start > blength) 
+        } else if ((cur_ts.tv_sec - burst_start > burst_length) 
                 && bursty && burst_mode == 1) {
             burst_mode = 0;
             burst_end = cur_ts.tv_sec;
-            length_seed++;
-            blength = rand_normal(burst_length_mean, 1, length_seed);
         }
 
         for (i = 0; i < ret; i++) {
@@ -901,11 +869,11 @@ int main(int argc, char *argv[])
     }
 
     if (argc >= 13) {
-        burst_length_mean = atoi(argv[12]);
+        burst_length = atoi(argv[12]);
     }
 
     if (argc >= 14) {
-        burst_interval_mean = atoi(argv[13]);
+        burst_interval = atoi(argv[13]);
     }
 
     if (argc >= 15) {
