@@ -770,7 +770,6 @@ static void save_hist(uint32_t *hist)
   strcat(file_path, dir_path);
   strcat(file_path, file_name);
   f = fopen(temp_path, "w");
-
   if (f == NULL)
   {
     perror("error opening file");
@@ -910,11 +909,11 @@ int main(int argc, char *argv[])
     }
 
     if (argc >= 15) {
-        dir_path = argv[11];
+        dir_path = argv[14];
     }
 
     if (argc >= 16) {
-        file_name = argv[12];
+        file_name = argv[15];
     }
 
     assert(sizeof(*cs) % 64 == 0);
