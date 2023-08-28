@@ -1,12 +1,16 @@
-TARGETS = echoserver_linux testclient_linux echoserver_ll \
-	  echoserver_mtcp testclient_mtcp
+TARGETS = echoserver_linux testclient_linux testclient_linux_bursty \
+      echoserver_ll echoserver_mtcp testclient_mtcp
 
 TAS_CODE?=/local/mstolet/projects/tas
 
+CPPFLAGS+= -I$(TAS_CODE)/include
 CFLAGS = -std=gnu99 -g -Wall -O3 -march=native \
 	-I$(TAS_CODE)/include -I$(TAS_CODE)/lib/tas/include
 LDFLAGS =-m64 -g -O3 -pthread  -march=native -no-pie
-LDLIBS = -lrt
+LDLIBS = -lrt -lm -lrte_eal \
+
+CPPFLAGS+= -I$(RTE_SDK)/include -I$(RTE_SDK)/include/dpdk
+LDFLAGS+= -L$(RTE_SDK)/lib/
 
 ESOBJS_COMMON= $(TAS_CODE)/lib/utils/rng.o \
 	icache_fill1.o icache_fill8.o icache_fill64.o icache_fill256.o \
@@ -15,7 +19,7 @@ ESOBJS_COMMON= $(TAS_CODE)/lib/utils/rng.o \
 include ../common/Makefile.mtcp
 
 
-all: echoserver_linux testclient_linux echoserver_ll
+all: echoserver_linux testclient_linux testclient_linux_bursty echoserver_ll
 all-sockets: echoserver_linux testclient_linux
 all-mtcp: echoserver_mtcp testclient_mtcp
 all-ll: echoserver_ll
@@ -32,6 +36,10 @@ echoserver_mtcp: echoserver.mtcp.o $(ESOBJS_COMMON)
 	$(CC) $(LDFLAGS) $(MTCP_LDFLAGS) -o $@ $^ $(LDLIBS) $(MTCP_LDLIBS)
 
 testclient_linux: testclient.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
+testclient_linux_bursty: testclient_bursty.o qman.o tsc.o \
+	$(TAS_CODE)/lib/utils/rng.o $(TAS_CODE)/lib/utils/utils.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 testclient_mtcp: testclient.mtcp.o

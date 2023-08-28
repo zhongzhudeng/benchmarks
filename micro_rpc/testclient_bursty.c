@@ -43,8 +43,12 @@
 #include <inttypes.h>
 #include <time.h>
 #include <sys/time.h>
+#include <math.h>
 
 #include <utils.h>
+#include <utils_rng.h>
+
+#include "qman.h"
 #include "../common/socket_shim.h"
 
 #ifdef USE_MTCP
@@ -71,7 +75,8 @@
 
 #define HIST_START_US 0
 #define HIST_BUCKET_US 1
-#define HIST_BUCKETS (256 * 1024)
+#define HIST_BUCKETS (1024 * 1024)
+#define QMAN_SKIPLIST_LEVELS 4
 
 #define MAX_FILE_PATH_SIZE 200
 
@@ -84,6 +89,10 @@ enum conn_state {
 
 static char *dir_path;
 static char *file_name;
+static uint32_t normal_rate = 10000; // Normal rate per flow in kbps
+static uint32_t burst_rate = 10000; // Burst rate per flow in kbps
+static uint64_t burst_length = 0;
+static uint64_t burst_interval = 0;
 static uint32_t max_pending = 64;
 static uint32_t max_conn_pending = 16;
 static uint32_t message_size = 64;
@@ -97,6 +106,7 @@ static volatile int start_running = 0;
 struct connection {
     enum conn_state state;
     int fd;
+    int id;
     int ep_wr;
     uint32_t pending;
     uint32_t tx_remain;
@@ -105,7 +115,6 @@ struct connection {
     void *rx_buf;
     void *tx_buf;
     struct sockaddr_in *addr;
-
     struct connection *next_closed;
 #ifdef PRINT_STATS
     uint64_t cnt;
@@ -113,6 +122,7 @@ struct connection {
 };
 
 struct core {
+    struct qman_thread qman;
     struct connection *conns;
     uint64_t messages;
 #ifdef PRINT_STATS
@@ -140,7 +150,7 @@ struct core {
     pthread_t pthread;
 } __attribute__((aligned(64)));
 
-static void open_all(struct core *c);
+static void open_all(struct core *c, uint8_t burst_mode);
 
 
 static inline uint64_t get_nanos(void)
@@ -177,9 +187,10 @@ static inline uint64_t read_cnt(uint64_t *p)
 }
 #endif
 
-static inline void conn_connect(struct core *c, struct connection *co)
+static inline void conn_connect(struct core *c, struct connection *co, uint8_t burst_mode)
 {
     int fd, cn, ret;
+    uint32_t co_rate;
     ssctx_t sc;
     ss_epev_t ev;
 
@@ -221,6 +232,16 @@ static inline void conn_connect(struct core *c, struct connection *co)
         /* success */
         CONN_DEBUG(c, co, "Connection succeeded\n");
         co->state = CONN_OPEN;
+
+        if (burst_mode)
+            co_rate = normal_rate;
+        else
+            co_rate = burst_rate;
+
+        qman_set(&c->qman, co->id, co_rate, 
+            (max_pending - co->pending) * message_size, 
+            (max_pending - co->pending) * message_size,
+            QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);
     } else if (ret < 0 && errno == EINPROGRESS) {
         /* still going on */
         CONN_DEBUG(c, co, "Connection pending: %d\n", fd);
@@ -297,6 +318,11 @@ static void prepare_core(struct core *c)
         abort();
     }
 
+    if (qman_thread_init(&c->qman, c->id) < 0) {
+        fprintf(stderr, "[%d] initializing qman failed\n", cn);
+        abort();
+    }
+
     /* Initiate connections */
     c->closed_conns = NULL;
     next_addr = (num_conns * c->id) % addrs_num;
@@ -308,6 +334,7 @@ static void prepare_core(struct core *c)
         c->conns[i].tx_buf = buf + message_size;
         c->conns[i].state = CONN_CLOSED;
         c->conns[i].fd = -1;
+        c->conns[i].id = i;
         c->conns[i].addr = &addrs[next_addr];
 
         c->conns[i].next_closed = c->closed_conns;
@@ -338,10 +365,12 @@ static inline void conn_error(struct core *c, struct connection *co,
     conn_close(c, co);
 }
 
-static inline int conn_receive(struct core *c, struct connection *co)
+static inline int conn_receive(struct core *c, 
+        struct connection *co, uint8_t burst_mode)
 {
     int fd, ret;
     int cn;
+    uint32_t co_rate;
     uint64_t *rx_ts;
     void *rx_buf;
     ssctx_t sc;
@@ -396,6 +425,16 @@ static inline int conn_receive(struct core *c, struct connection *co)
         }
     } while (co->pending > 0 && ret > 0);
 
+    if (burst_mode)
+        co_rate = burst_rate;
+    else
+        co_rate = normal_rate;
+
+    qman_set(&c->qman, co->id, co_rate, 
+        (max_pending - co->pending) * message_size, 
+        (max_pending - co->pending) * message_size, 
+        QMAN_SET_RATE | QMAN_SET_AVAIL | QMAN_SET_MAXCHUNK);
+
     if (co->state == CONN_CLOSING && co->pending == 0) {
         conn_close(c, co);
         return 1;
@@ -404,10 +443,12 @@ static inline int conn_receive(struct core *c, struct connection *co)
     return 0;
 }
 
-static inline int conn_send(struct core *c, struct connection *co)
+static inline int conn_send(struct core *c, 
+        struct connection *co, uint8_t burst_mode)
 {
     int fd, ret, wait_wr;
     int cn;
+    uint32_t co_rate;
     uint64_t *tx_ts;
     void *tx_buf;
     ssctx_t sc;
@@ -451,6 +492,7 @@ static inline int conn_send(struct core *c, struct connection *co)
                 co->pending++;
                 co->tx_cnt++;
                 co->tx_remain = message_size;
+
                 if ((co->pending < max_pending || max_pending == 0) &&
                     (co->tx_cnt < num_msgs || num_msgs == 0))
                 {
@@ -470,6 +512,16 @@ static inline int conn_send(struct core *c, struct connection *co)
             STATS_ADD(c, tx_fail, 1);
         }
     }
+
+    if (burst_mode)
+        co_rate = burst_rate;
+    else
+        co_rate = normal_rate;
+
+    qman_set(&c->qman, co->id, co_rate, 
+        (max_pending - co->pending) * message_size, 
+        (max_pending - co->pending) * message_size, 
+        QMAN_SET_RATE | QMAN_SET_AVAIL | QMAN_SET_MAXCHUNK);
 
     /* make sure we epoll for write iff we're actually blocked on writes */
     if (wait_wr != co->ep_wr) {
@@ -496,9 +548,10 @@ static inline int conn_send(struct core *c, struct connection *co)
 }
 
 static inline void conn_events(struct core *c, struct connection *co,
-        uint32_t events)
+        uint32_t events, uint8_t burst_mode)
 {
     int status;
+    uint32_t co_rate;
     socklen_t slen;
 #ifdef PRINT_STATS
     uint64_t tsc;
@@ -532,17 +585,23 @@ static inline void conn_events(struct core *c, struct connection *co,
 
         CONN_DEBUG(c, co, "Connection successfully opened\n");
         co->state = CONN_OPEN;
+        
+        if (burst_mode)
+            co_rate = normal_rate;
+        else
+            co_rate = burst_rate;
+
+        qman_set(&c->qman, co->id, co_rate, 
+            (max_pending - co->pending) * message_size, 
+            (max_pending - co->pending) * message_size,
+            QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);
         c->conn_open++;
     }
 
     /* receive responses */
     if ((events & SS_EPOLLIN) == SS_EPOLLIN &&
-        conn_receive(c, co) != 0)
+        conn_receive(c, co, burst_mode) != 0)
     {
-        return;
-    }
-
-    if (conn_send(c, co) != 0) {
         return;
     }
 
@@ -552,7 +611,7 @@ static inline void conn_events(struct core *c, struct connection *co,
     }
 }
 
-static inline void connect_more(struct core *c)
+static inline void connect_more(struct core *c, uint8_t burst_mode)
 {
   struct connection *co;
   while ((co = c->closed_conns) != NULL &&
@@ -561,12 +620,12 @@ static inline void connect_more(struct core *c)
   {
     c->closed_conns = co->next_closed;
 
-    conn_connect(c, co);
+    conn_connect(c, co, burst_mode);
     c->conn_pending++;
   }
 }
 
-static void open_all(struct core *c)
+static void open_all(struct core *c, uint8_t burst_mode)
 {
     int i, ret, ep, status;
     struct connection *co;
@@ -579,7 +638,8 @@ static void open_all(struct core *c)
     sc = c->sc;
 
     while (c->conn_open != num_conns) {
-        connect_more(c);
+        connect_more(c, burst_mode);
+
         /* epoll, wait for events */
         if ((ret = ss_epoll_wait(sc, ep, evs, max_conn_pending, -1)) < 0) {
             fprintf(stderr, "[%ld] epoll_wait failed\n", c->id);
@@ -617,6 +677,10 @@ static void open_all(struct core *c)
             CONN_DEBUG(c, co, "Connection successfully opened\n");
             co->state = CONN_OPEN;
             c->conn_open++;
+            qman_set(&c->qman, co->id, normal_rate, 
+                (max_pending - co->pending) * message_size, 
+                (max_pending - co->pending) * message_size,
+                QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);
 
             ev.data.ptr = co;
             ev.events = SS_EPOLLIN | SS_EPOLLHUP | SS_EPOLLERR;
@@ -642,16 +706,22 @@ static void open_all(struct core *c)
 
 static void *thread_run(void *arg)
 {
+    unsigned q_ids[BATCH_SIZE];
+    uint32_t q_bytes[BATCH_SIZE];
     struct core *c = arg;
-    int i, cn, ret, ep, num_evs;
+    int i, j, cn, ret, ep, num_evs, n_send;
+    unsigned int n_msgs;
     struct connection *co;
+    struct timeval cur_ts;
+    time_t burst_start = 0, burst_end = 0;
     ssctx_t sc;
     ss_epev_t *evs;
+    uint8_t burst_mode = 0;
 
     prepare_core(c);
 
     if (openall_delay != 0) {
-        open_all(c);
+        open_all(c, burst_mode);
         while (!start_running);
     }
 
@@ -666,17 +736,37 @@ static void *thread_run(void *arg)
 
     while (1) {
         if (c->closed_conns != NULL)
-            connect_more(c);
+            connect_more(c, burst_mode);
 
-        /* epoll, wait for events */
-        if ((ret = ss_epoll_wait(sc, ep, evs, num_evs, -1)) < 0) {
+        /* epoll, check for events */
+        if ((ret = ss_epoll_wait(sc, ep, evs, num_evs, 0)) < 0) {
             fprintf(stderr, "[%d] epoll_wait failed\n", cn);
             abort();
         }
 
-        for (i = 0; i < ret; i++) {
-            co = evs[i].data.ptr;
-            conn_events(c, co, evs[i].events);
+        if (ret > 0) {
+            gettimeofday(&cur_ts, NULL);
+            if ((cur_ts.tv_sec - burst_end > burst_interval) 
+                    && burst_mode == 0) {
+                burst_mode = 1;
+                burst_start = cur_ts.tv_sec;
+            } else if ((cur_ts.tv_sec - burst_start > burst_length) 
+                    && burst_mode == 1) {
+                burst_mode = 0;
+                burst_end = cur_ts.tv_sec;
+            }
+
+            for (i = 0; i < ret; i++) {
+                co = evs[i].data.ptr;
+                conn_events(c, co, evs[i].events, burst_mode);
+            }
+        }
+
+        n_send = qman_poll(&c->qman, BATCH_SIZE, q_ids, q_bytes);
+        for (i = 0; i < n_send; i++) {
+            n_msgs = q_bytes[i] / message_size;
+            for (j = 0; j < n_msgs; j++)
+                conn_send(c, &c->conns[q_ids[i]], burst_mode);
         }
     }
 }
@@ -719,6 +809,7 @@ static void save_hist(uint32_t *hist)
   strcat(file_path, dir_path);
   strcat(file_path, file_name);
   f = fopen(temp_path, "w");
+
   if (f == NULL)
   {
     perror("error opening file");
@@ -799,10 +890,11 @@ int main(int argc, char *argv[])
 
     setlocale(LC_NUMERIC, "");
 
-    if (argc < 5 || argc > 16) {
+    if (argc < 5 || argc > 18) {
         fprintf(stderr, "Usage: ./testclient IP PORT CORES CONFIG "
             "[MESSAGE-SIZE] [MAX-PENDING] [TOTAL-CONNS] "
-            "[OPENALL-DELAY] [MAX-MSGS-CONN] [MAX-PEND-CONNS] " 
+            "[OPENALL-DELAY] [MAX-MSGS-CONN] [MAX-PEND-CONNS] "
+            "[NORMAL-RATE] [BURST-RATE] [BURST-LENGTH] [BURST-INTERVAL] "
             "[LATENCY-FILE-DIR] [LATENCY-FILE]\n");
         return EXIT_FAILURE;
     }
@@ -845,11 +937,27 @@ int main(int argc, char *argv[])
     }
 
     if (argc >= 12) {
-        dir_path = argv[11];
+        normal_rate = atoi(argv[11]);
     }
 
     if (argc >= 13) {
-        file_name = argv[12];
+        burst_rate = atoi(argv[12]);
+    }
+
+    if (argc >= 14) {
+        burst_length = atoi(argv[13]);
+    }
+
+    if (argc >= 15) {
+        burst_interval = atoi(argv[14]);
+    }
+
+    if (argc >= 16) {
+        dir_path = argv[15];
+    }
+
+    if (argc >= 17) {
+        file_name = argv[16];
     }
 
     assert(sizeof(*cs) % 64 == 0);
