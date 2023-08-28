@@ -746,14 +746,14 @@ static void *thread_run(void *arg)
 
         if (ret > 0) {
             gettimeofday(&cur_ts, NULL);
-            if ((cur_ts.tv_sec - burst_end > burst_interval) 
-                    && burst_mode == 0) {
-                burst_mode = 1;
-                burst_start = cur_ts.tv_sec;
-            } else if ((cur_ts.tv_sec - burst_start > burst_length) 
+            if ((cur_ts.tv_sec - burst_start > burst_length) 
                     && burst_mode == 1) {
                 burst_mode = 0;
                 burst_end = cur_ts.tv_sec;
+            } else if ((cur_ts.tv_sec - burst_end > burst_interval) 
+                    && burst_mode == 0) {
+                burst_mode = 1;
+                burst_start = cur_ts.tv_sec;
             }
 
             for (i = 0; i < ret; i++) {
