@@ -234,9 +234,9 @@ static inline void conn_connect(struct core *c, struct connection *co, uint8_t b
         co->state = CONN_OPEN;
 
         if (burst_mode)
-            co_rate = normal_rate;
-        else
             co_rate = burst_rate;
+        else
+            co_rate = normal_rate;
 
         qman_set(&c->qman, co->id, co_rate, 
             (max_pending - co->pending) * message_size, 
@@ -587,9 +587,9 @@ static inline void conn_events(struct core *c, struct connection *co,
         co->state = CONN_OPEN;
         
         if (burst_mode)
-            co_rate = normal_rate;
-        else
             co_rate = burst_rate;
+        else
+            co_rate = normal_rate;
 
         qman_set(&c->qman, co->id, co_rate, 
             (max_pending - co->pending) * message_size, 
@@ -628,6 +628,7 @@ static inline void connect_more(struct core *c, uint8_t burst_mode)
 static void open_all(struct core *c, uint8_t burst_mode)
 {
     int i, ret, ep, status;
+    uint32_t co_rate;
     struct connection *co;
     ssctx_t sc;
     socklen_t slen;
@@ -677,7 +678,12 @@ static void open_all(struct core *c, uint8_t burst_mode)
             CONN_DEBUG(c, co, "Connection successfully opened\n");
             co->state = CONN_OPEN;
             c->conn_open++;
-            qman_set(&c->qman, co->id, normal_rate, 
+	    if (burst_mode)
+	        co_rate = burst_rate;
+	    else
+	        co_rate = normal_rate;
+
+            qman_set(&c->qman, co->id, co_rate, 
                 (max_pending - co->pending) * message_size, 
                 (max_pending - co->pending) * message_size,
                 QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);
@@ -717,6 +723,9 @@ static void *thread_run(void *arg)
     ssctx_t sc;
     ss_epev_t *evs;
     uint8_t burst_mode = 0;
+
+    gettimeofday(&cur_ts, NULL);
+    burst_end = cur_ts.tv_sec; 
 
     prepare_core(c);
 
