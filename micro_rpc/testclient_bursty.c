@@ -724,15 +724,15 @@ static void *thread_run(void *arg)
     ss_epev_t *evs;
     uint8_t burst_mode = 0;
 
-    gettimeofday(&cur_ts, NULL);
-    burst_end = cur_ts.tv_sec; 
-
     prepare_core(c);
 
     if (openall_delay != 0) {
         open_all(c, burst_mode);
         while (!start_running);
     }
+    
+    gettimeofday(&cur_ts, NULL);
+    burst_end = cur_ts.tv_sec; 
 
     cn = c->id;
     ep = c->ep;
