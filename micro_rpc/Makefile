@@ -1,5 +1,6 @@
 TARGETS = echoserver_linux testclient_linux testclient_linux_bursty \
-      echoserver_ll echoserver_mtcp testclient_mtcp
+      testclient_linux_open_latency echoserver_ll \
+      echoserver_mtcp testclient_mtcp
 
 TAS_CODE?=/local/mstolet/projects/tas
 
@@ -19,7 +20,8 @@ ESOBJS_COMMON= $(TAS_CODE)/lib/utils/rng.o \
 include ../common/Makefile.mtcp
 
 
-all: echoserver_linux testclient_linux testclient_linux_bursty echoserver_ll
+all: echoserver_linux testclient_linux testclient_linux_bursty \
+        testclient_linux_open_latency echoserver_ll
 all-sockets: echoserver_linux testclient_linux
 all-mtcp: echoserver_mtcp testclient_mtcp
 all-ll: echoserver_ll
@@ -40,6 +42,9 @@ testclient_linux: testclient.o
 
 testclient_linux_bursty: testclient_bursty.o qman.o tsc.o \
 	$(TAS_CODE)/lib/utils/rng.o $(TAS_CODE)/lib/utils/utils.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
+testclient_linux_open_latency: testclient_open_latency.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 testclient_mtcp: testclient.mtcp.o
