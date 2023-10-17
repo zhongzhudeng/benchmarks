@@ -225,7 +225,6 @@ static inline void conn_connect(struct core *c, struct connection *co)
     if (ret == 0) {
         /* success */
         CONN_DEBUG(c, co, "Connection succeeded\n");
-        record_latency(c->hist, get_nanos() - co->conn_ts);
         record_latency(c->hist_open, get_nanos() - co->conn_ts);
         co->state = CONN_OPEN;
     } else if (ret < 0 && errno == EINPROGRESS) {
@@ -345,6 +344,9 @@ static inline void conn_close(struct core *c, struct connection *co)
     co->state = CONN_CLOSED;
     co->fd = -1;
 
+    if (co->state == CONN_CLOSING)
+        record_latency(c->hist, get_nanos() - co->conn_ts);
+
     co->next_closed = c->closed_conns;
     c->closed_conns = co;
 }
@@ -393,7 +395,6 @@ static inline int conn_receive(struct core *c, struct connection *co)
             if (co->rx_remain == 0) {
                 /* received whole message */
                 __sync_fetch_and_add(&c->messages, 1);
-                record_latency(c->hist, get_nanos() - *rx_ts);
                 record_latency(c->hist_msgs, get_nanos() - *rx_ts);
                 co->rx_remain = message_size;
                 co->pending--;
@@ -551,7 +552,6 @@ static inline void conn_events(struct core *c, struct connection *co,
         }
 
         CONN_DEBUG(c, co, "Connection successfully opened\n");
-        record_latency(c->hist, get_nanos() - co->conn_ts);
         record_latency(c->hist_open, get_nanos() - co->conn_ts);
         co->state = CONN_OPEN;
         c->conn_open++;
@@ -640,7 +640,6 @@ static void open_all(struct core *c)
             }
 
             CONN_DEBUG(c, co, "Connection successfully opened\n");
-            record_latency(c->hist, get_nanos() - co->conn_ts);
             record_latency(c->hist_open, get_nanos() - co->conn_ts);
             co->state = CONN_OPEN;
             c->conn_open++;
