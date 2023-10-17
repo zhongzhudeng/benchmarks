@@ -341,11 +341,11 @@ static inline void conn_close(struct core *c, struct connection *co)
         c->conn_open--;
 
     ss_close(c->sc, co->fd);
+    if (co->state == CONN_CLOSING)
+        record_latency(c->hist, get_nanos() - co->conn_ts);
     co->state = CONN_CLOSED;
     co->fd = -1;
 
-    if (co->state == CONN_CLOSING)
-        record_latency(c->hist, get_nanos() - co->conn_ts);
 
     co->next_closed = c->closed_conns;
     c->closed_conns = co;
