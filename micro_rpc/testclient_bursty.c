@@ -77,8 +77,6 @@
 #define HIST_BUCKET_US 1
 #define HIST_BUCKETS (1024 * 1024)
 #define QMAN_SKIPLIST_LEVELS 4
-#define MAX_UINT32 0xffffffff  
-#define MAX_UINT16 0xffff  
 
 #define MAX_FILE_PATH_SIZE 200
 
@@ -238,17 +236,10 @@ static inline void conn_connect(struct core *c, struct connection *co, uint8_t b
         else
             co_rate = normal_rate;
 
-	if (max_pending == 0) {
-            qman_set(&c->qman, co->id, co_rate, 
-                MAX_UINT32, 
-                MAX_UINT16,
-                QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);
-	} else {
-            qman_set(&c->qman, co->id, co_rate, 
-                (max_pending - co->pending) * message_size, 
-                (max_pending - co->pending) * message_size,
-                QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);	
-	}
+        qman_set(&c->qman, co->id, co_rate, 
+            (max_pending - co->pending) * message_size, 
+            (max_pending - co->pending) * message_size,
+            QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);
     } else if (ret < 0 && errno == EINPROGRESS) {
         /* still going on */
         CONN_DEBUG(c, co, "Connection pending: %d\n", fd);
@@ -437,17 +428,10 @@ static inline int conn_receive(struct core *c,
     else
         co_rate = normal_rate;
 
-    if (max_pending == 0) {
-        qman_set(&c->qman, co->id, co_rate, 
-            MAX_UINT32, 
-            MAX_UINT16,
-            QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);
-    } else {
-        qman_set(&c->qman, co->id, co_rate, 
-            (max_pending - co->pending) * message_size, 
-            (max_pending - co->pending) * message_size,
-            QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);	
-    }
+    qman_set(&c->qman, co->id, co_rate, 
+        (max_pending - co->pending) * message_size, 
+        (max_pending - co->pending) * message_size, 
+        QMAN_SET_RATE | QMAN_SET_AVAIL | QMAN_SET_MAXCHUNK);
 
     if (co->state == CONN_CLOSING && co->pending == 0) {
         conn_close(c, co);
@@ -532,17 +516,10 @@ static inline int conn_send(struct core *c,
     else
         co_rate = normal_rate;
 
-    if (max_pending == 0) {
-        qman_set(&c->qman, co->id, co_rate, 
-            MAX_UINT32, 
-            MAX_UINT16,
-            QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);
-    } else {
-        qman_set(&c->qman, co->id, co_rate, 
-            (max_pending - co->pending) * message_size, 
-            (max_pending - co->pending) * message_size,
-            QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);	
-    }
+    qman_set(&c->qman, co->id, co_rate, 
+        (max_pending - co->pending) * message_size, 
+        (max_pending - co->pending) * message_size, 
+        QMAN_SET_RATE | QMAN_SET_AVAIL | QMAN_SET_MAXCHUNK);
 
     /* make sure we epoll for write iff we're actually blocked on writes */
     if (wait_wr != co->ep_wr) {
@@ -612,17 +589,10 @@ static inline void conn_events(struct core *c, struct connection *co,
         else
             co_rate = normal_rate;
 
-	if (max_pending == 0) {
-            qman_set(&c->qman, co->id, co_rate, 
-                MAX_UINT32, 
-                MAX_UINT16,
-                QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);
-	} else {
-            qman_set(&c->qman, co->id, co_rate, 
-                (max_pending - co->pending) * message_size, 
-                (max_pending - co->pending) * message_size,
-                QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);	
-	}
+        qman_set(&c->qman, co->id, co_rate, 
+            (max_pending - co->pending) * message_size, 
+            (max_pending - co->pending) * message_size,
+            QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);
         c->conn_open++;
     }
 
@@ -706,22 +676,16 @@ static void open_all(struct core *c, uint8_t burst_mode)
             CONN_DEBUG(c, co, "Connection successfully opened\n");
             co->state = CONN_OPEN;
             c->conn_open++;
+            
 	    if (burst_mode)
-	        co_rate = burst_rate;
+                co_rate = burst_rate;
 	    else
 	        co_rate = normal_rate;
-
-            if (max_pending == 0) {
-                qman_set(&c->qman, co->id, co_rate, 
-                    MAX_UINT32, 
-                    MAX_UINT16,
-                    QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);
-            } else {
-                qman_set(&c->qman, co->id, co_rate, 
-                    (max_pending - co->pending) * message_size, 
-                    (max_pending - co->pending) * message_size,
-                    QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);	
-            }
+	    
+	    qman_set(&c->qman, co->id, co_rate, 
+                (max_pending - co->pending) * message_size, 
+                (max_pending - co->pending) * message_size,
+                QMAN_SET_RATE | QMAN_SET_MAXCHUNK | QMAN_SET_AVAIL);
 
             ev.data.ptr = co;
             ev.events = SS_EPOLLIN | SS_EPOLLHUP | SS_EPOLLERR;
@@ -767,7 +731,7 @@ static void *thread_run(void *arg)
     }
     
     gettimeofday(&cur_ts, NULL);
-    burst_end = cur_ts.tv_sec; 
+    burst_end = cur_ts.tv_sec;
 
     cn = c->id;
     ep = c->ep;
@@ -961,6 +925,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "allocating total histogram failed\n");
         abort();
     }
+
 
     for (i = 0; i < num_threads; i++) {
         cs[i].id = i;
