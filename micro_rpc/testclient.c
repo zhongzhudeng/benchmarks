@@ -712,12 +712,18 @@ static void save_hist(uint32_t *hist)
   int i, ret;
   char temp_path[MAX_FILE_PATH_SIZE] = "";
   char file_path[MAX_FILE_PATH_SIZE] = "";
-
+  
   strcat(temp_path, dir_path);
-  strcat(temp_path, "temp");
+  strcat(temp_path, "temp-");
+  strcat(temp_path, "hist");
+  strcat(temp_path, "-");
+  strcat(temp_path, file_name);
 
   strcat(file_path, dir_path);
+  strcat(file_path, "hist");
+  strcat(file_path, "-");
   strcat(file_path, file_name);
+
   f = fopen(temp_path, "w");
   if (f == NULL)
   {
