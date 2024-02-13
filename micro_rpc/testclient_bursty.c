@@ -950,7 +950,7 @@ int main(int argc, char *argv[])
         open_total = 0;
         for (i = 0; i < num_threads; i++) {
             tp = cs[i].messages;
-            n_messages += cs[i].messages;
+            n_messages += tp;
             open_total += cs[i].conn_open;
             cs[i].messages = 0;
             tp /= (double) (t_cur - t_prev) / 1000000000.;
