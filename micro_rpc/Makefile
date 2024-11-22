@@ -2,16 +2,13 @@ TARGETS = echoserver_linux testclient_linux testclient_linux_bursty \
       testclient_linux_open_latency echoserver_ll \
       echoserver_mtcp testclient_mtcp
 
-TAS_CODE?=/local/mstolet/projects/tas
+TAS_CODE?=$(HOME)/tas
+RTE_SDK?=${HOME}/dpdk-inst
 
-CPPFLAGS+= -I$(TAS_CODE)/include
 CFLAGS = -std=gnu99 -g -Wall -O3 -march=native \
-	-I$(TAS_CODE)/include -I$(TAS_CODE)/lib/tas/include
-LDFLAGS =-m64 -g -O3 -pthread  -march=native -no-pie
+	-I$(TAS_CODE)/include -I$(TAS_CODE)/lib/tas/include -I$(RTE_SDK)/include
+LDFLAGS =-m64 -g -O3 -pthread  -march=native -no-pie -L$(RTE_SDK)/lib/x86_64-linux-gnu
 LDLIBS = -lrt -lm -lrte_eal \
-
-CPPFLAGS+= -I$(RTE_SDK)/include -I$(RTE_SDK)/include/dpdk
-LDFLAGS+= -L$(RTE_SDK)/lib/
 
 ESOBJS_COMMON= $(TAS_CODE)/lib/utils/rng.o \
 	icache_fill1.o icache_fill8.o icache_fill64.o icache_fill256.o \
